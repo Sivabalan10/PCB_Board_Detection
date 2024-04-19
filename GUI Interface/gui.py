@@ -1,3 +1,4 @@
+import sqlite3
 import threading
 import time
 import tkinter as tk
@@ -8,6 +9,102 @@ import sys
 import subprocess
 import os
 from PIL import ImageTk, Image
+
+
+def create_database_and_tables():
+    conn = sqlite3.connect('config.db')
+    cursor = conn.cursor()
+    cursor.execute('''SELECT name FROM sqlite_master WHERE type='table' AND name='users' ''')
+    users_table_exists = cursor.fetchone()
+    cursor.execute('''SELECT name FROM sqlite_master WHERE type='table' AND name='cameras' ''')
+    cameras_table_exists = cursor.fetchone()
+    check = 0
+    if not users_table_exists:
+        cursor.execute('''CREATE TABLE users (
+                            id INTEGER PRIMARY KEY,
+                            username TEXT UNIQUE,
+                            password TEXT,
+                            uuid TEXT DEFAULT 0,
+                            initial_state INTEGER DEFAULT 0
+                        )''')
+    if not cameras_table_exists:
+        cursor.execute('''CREATE TABLE cameras (
+                            id INTEGER PRIMARY KEY,
+                            ip1 TEXT,
+                            plcip TEXT,
+                            plcport INTEGER,
+                            jam_check_time INTEGER
+                        )''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS records
+                      (id INTEGER PRIMARY KEY,
+                       camera TEXT,
+                       screenshot_location TEXT,
+                       timestamp TEXT,
+                       PLC_ID INTEGER(20))''')
+    cursor.execute('''SELECT name FROM sqlite_master WHERE type='table' AND name='model' ''')
+
+    model_table_exists = cursor.fetchone()
+    
+    cursor.execute('''CREATE TABLE IF NOT EXISTS model (
+                        model_1 TEXT
+                    )''')
+    if not model_table_exists:
+        model_data = ('models\\1.pt',)
+        cursor.execute('''INSERT INTO model (model_1) VALUES (?)''', model_data,)
+    conn.commit()
+    conn.close()
+
+
+def create_table():
+    conn = sqlite3.connect('config.db')
+    cursor = conn.cursor()
+    cursor.execute('''INSERT INTO records (camera, screenshot_location, timestamp, PLC_ID)
+                      VALUES ('Camera 1', 'location1.jpg', '2024-03-08 10:00:00', 3)''')
+    cursor.execute('''INSERT INTO records (camera, screenshot_location, timestamp, PLC_ID)
+                      VALUES ('Camera 2', 'location2.jpg', '2024-03-08 10:05:00', 2)''')
+    cursor.execute('''INSERT INTO records (camera, screenshot_location, timestamp, PLC_ID)
+                      VALUES ('Camera 3', 'location3.jpg', '2024-03-08 10:10:00', 1)''')
+    cursor.execute('''INSERT INTO records (camera, screenshot_location, timestamp, PLC_ID)
+                      VALUES ('Camera 4', 'https://sqliteviewer.app/#/config.db/table/users/', '2024-03-08 10:15:00', 4)''')
+
+    conn.commit()
+    conn.close()
+
+
+def get_db_connection():
+    conn = sqlite3.connect('config.db')
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def login_post(user, password_1):
+    username = user
+    password = password_1
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute('SELECT * FROM users WHERE username = ?', (username,))
+        user_row = cursor.fetchone()
+
+        if user:
+            user_password = user_row['password']
+            if user_password == password:
+                print("Password correct")
+                return True
+            else:
+                return False
+        else:
+            print("User not found in the database")
+            return False
+    except Exception as e:
+        print("Error:", e)
+        return False
+    finally:
+        conn.close()
+
+# --------------------------------------------------------------------------------------------
+create_database_and_tables()
 
 class Detection:
     def __init__(self, video_path):
@@ -70,9 +167,9 @@ class LoginPage(ttk.Frame):
         const5 = int(height / 21.6)  # 40
 
         label = ttk.Label(self, text="Login Page", font=('Times New Roman', const1))  
-        label.pack(pady=(const2, const3))  # Increased top padding
+        label.pack(pady=(const2, const3))  
 
-        username_label = ttk.Label(self, text="Username:", font=('Times New Roman', const4)) 
+        username_label = ttk.Label(self, text="Username:", font=('Times New Roman', const4))  
         username_label.pack()
         self.username_entry = ttk.Entry(self, font=('Times New Roman', const4))  
         self.username_entry.pack()
@@ -89,13 +186,21 @@ class LoginPage(ttk.Frame):
         style.configure('Login.TButton', font=button_font)
 
     def handle_login(self):
-        username = self.username_entry.get() 
-        password = self.password_entry.get()  
-        if username == "demo":
-            login_status = True
+        username = self.username_entry.get()  # Retrieve username
+        password = self.password_entry.get()  # Retrieve password
+        print("Username:", username)
+        print("Password:", password)
+        login_status = login_post(username, password)
         if login_status:
             messagebox.showinfo("Login Successful", "Welcome, " + username + "!")
-            self.master.show_frame("ip_address")
+            val = "Live"
+            if val == "Load":
+                self.master.show_frame("ip_address")
+            elif val == "Live":
+                self.master.show_frame("welcome")
+            else:
+                print("Problem in database or getting ip ")
+
         else:
             print("invalid username and password")
             messagebox.showerror("Login Failed", "Invalid username or password.")
