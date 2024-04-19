@@ -30,7 +30,7 @@ class Application(tk.Tk):
         self.frames = {}
         self.login_frame = LoginPage(self)
         self.ip_address_frame = IPAddressPage(self)
-        self.show_frame("login")
+
 
     def show_frame(self, frame_name):
         if frame_name == "login":
@@ -40,7 +40,7 @@ class Application(tk.Tk):
         elif frame_name == "ip_address":
             self.login_frame.pack_forget()
             self.ip_address_frame.pack(fill='both', expand=True)
-            self.welcome_frame.pack_forget()
+          
 
 
 class LoginPage(ttk.Frame):
@@ -82,7 +82,7 @@ class LoginPage(ttk.Frame):
             login_status = True
         if login_status:
             messagebox.showinfo("Login Successful", "Welcome, " + username + "!")
-            self.master.show_frame("welcome")
+            self.master.show_frame("ip_address")
         else:
             print("invalid username and password")
             messagebox.showerror("Login Failed", "Invalid username or password.")
