@@ -1,12 +1,114 @@
+import sqlite3
 import threading
+import time
 import tkinter as tk
 from tkinter import ttk
 from tkinter import messagebox
 import cv2
+import sys
+import subprocess
+import os
+from PIL import ImageTk, Image
+
+
+def create_database_and_tables():
+    conn = sqlite3.connect('config.db')
+    cursor = conn.cursor()
+    cursor.execute('''SELECT name FROM sqlite_master WHERE type='table' AND name='users' ''')
+    users_table_exists = cursor.fetchone()
+    cursor.execute('''SELECT name FROM sqlite_master WHERE type='table' AND name='cameras' ''')
+    cameras_table_exists = cursor.fetchone()
+    check = 0
+    if not users_table_exists:
+        cursor.execute('''CREATE TABLE users (
+                            id INTEGER PRIMARY KEY,
+                            username TEXT UNIQUE,
+                            password TEXT,
+                            uuid TEXT DEFAULT 0,
+                            initial_state INTEGER DEFAULT 0
+                        )''')
+    if not cameras_table_exists:
+        cursor.execute('''CREATE TABLE cameras (
+                            id INTEGER PRIMARY KEY,
+                            ip1 TEXT,
+                            plcip TEXT,
+                            plcport INTEGER,
+                            jam_check_time INTEGER
+                        )''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS records
+                      (id INTEGER PRIMARY KEY,
+                       camera TEXT,
+                       screenshot_location TEXT,
+                       timestamp TEXT,
+                       PLC_ID INTEGER(20))''')
+    cursor.execute('''SELECT name FROM sqlite_master WHERE type='table' AND name='model' ''')
+
+    model_table_exists = cursor.fetchone()
+    
+    cursor.execute('''CREATE TABLE IF NOT EXISTS model (
+                        model_1 TEXT
+                    )''')
+    if not model_table_exists:
+        model_data = ('models\\1.pt',)
+        cursor.execute('''INSERT INTO model (model_1) VALUES (?)''', model_data,)
+    conn.commit()
+    conn.close()
+
+
+def create_table():
+    conn = sqlite3.connect('config.db')
+    cursor = conn.cursor()
+    cursor.execute('''INSERT INTO records (camera, screenshot_location, timestamp, PLC_ID)
+                      VALUES ('Camera 1', 'location1.jpg', '2024-03-08 10:00:00', 3)''')
+    cursor.execute('''INSERT INTO records (camera, screenshot_location, timestamp, PLC_ID)
+                      VALUES ('Camera 2', 'location2.jpg', '2024-03-08 10:05:00', 2)''')
+    cursor.execute('''INSERT INTO records (camera, screenshot_location, timestamp, PLC_ID)
+                      VALUES ('Camera 3', 'location3.jpg', '2024-03-08 10:10:00', 1)''')
+    cursor.execute('''INSERT INTO records (camera, screenshot_location, timestamp, PLC_ID)
+                      VALUES ('Camera 4', 'https://sqliteviewer.app/#/config.db/table/users/', '2024-03-08 10:15:00', 4)''')
+
+    conn.commit()
+    conn.close()
+
+
+def get_db_connection():
+    conn = sqlite3.connect('config.db')
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def login_post(user, password_1):
+    username = user
+    password = password_1
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute('SELECT * FROM users WHERE username = ?', (username,))
+        user_row = cursor.fetchone()
+
+        if user:
+            user_password = user_row['password']
+            if user_password == password:
+                print("Password correct")
+                return True
+            else:
+                return False
+        else:
+            print("User not found in the database")
+            return False
+    except Exception as e:
+        print("Error:", e)
+        return False
+    finally:
+        conn.close()
+
+# --------------------------------------------------------------------------------------------
+create_database_and_tables()
 
 class Detection:
     def __init__(self, video_path):
-        self.cap = cv2.VideoCapture(1)
+        self.cap = cv2.VideoCapture("C:/Users/SIVA/Downloads/WhatsApp Video 2024-04-19 at 9.34.26 PM.mp4")
 
     def get_frame(self):
         ret, frame = self.cap.read()
@@ -30,7 +132,8 @@ class Application(tk.Tk):
         self.frames = {}
         self.login_frame = LoginPage(self)
         self.ip_address_frame = IPAddressPage(self)
-
+        self.welcome_frame = WelcomePage(self)
+        self.show_frame("login")
 
     def show_frame(self, frame_name):
         if frame_name == "login":
@@ -41,6 +144,13 @@ class Application(tk.Tk):
             self.login_frame.pack_forget()
             self.ip_address_frame.pack(fill='both', expand=True)
           
+
+        elif frame_name == "welcome":
+            self.login_frame.pack_forget()
+            self.ip_address_frame.pack_forget()
+            self.welcome_frame.pack(fill='both', expand=True)
+            self.welcome_frame.show_menu()
+
 
 
 class LoginPage(ttk.Frame):
@@ -57,9 +167,9 @@ class LoginPage(ttk.Frame):
         const5 = int(height / 21.6)  # 40
 
         label = ttk.Label(self, text="Login Page", font=('Times New Roman', const1))  
-        label.pack(pady=(const2, const3))  # Increased top padding
+        label.pack(pady=(const2, const3))  
 
-        username_label = ttk.Label(self, text="Username:", font=('Times New Roman', const4)) 
+        username_label = ttk.Label(self, text="Username:", font=('Times New Roman', const4))  
         username_label.pack()
         self.username_entry = ttk.Entry(self, font=('Times New Roman', const4))  
         self.username_entry.pack()
@@ -76,13 +186,21 @@ class LoginPage(ttk.Frame):
         style.configure('Login.TButton', font=button_font)
 
     def handle_login(self):
-        username = self.username_entry.get() 
-        password = self.password_entry.get()  
-        if username == "demo":
-            login_status = True
+        username = self.username_entry.get()  # Retrieve username
+        password = self.password_entry.get()  # Retrieve password
+        print("Username:", username)
+        print("Password:", password)
+        login_status = login_post(username, password)
         if login_status:
             messagebox.showinfo("Login Successful", "Welcome, " + username + "!")
-            self.master.show_frame("ip_address")
+            val = "Live"
+            if val == "Load":
+                self.master.show_frame("ip_address")
+            elif val == "Live":
+                self.master.show_frame("welcome")
+            else:
+                print("Problem in database or getting ip ")
+
         else:
             print("invalid username and password")
             messagebox.showerror("Login Failed", "Invalid username or password.")
@@ -170,6 +288,76 @@ class IPAddressPage(ttk.Frame):
         else:
             print("Database couldn't be read")
 
+class WelcomePage(ttk.Frame):
+    def __init__(self, master):
+        super().__init__(master)
+        self.master = master
+
+        ht = self.winfo_screenheight()
+        const2 = int(ht / 86.4)
+        const3 = int(ht / 172.8)
+        self.const4 = int(ht / 21.6)
+        self.playing = True
+
+        self.frame = tk.Frame(self)
+        self.frame.grid(row=1, column=0, padx=const2, pady=const2)
+
+        self.label = tk.Label(self.frame)
+        self.label.grid(row=0, column=0, padx=const3, pady=const3)
+
+        self.video_file = "C:/Users/SIVA/OneDrive/Pictures/Icecream Screen Recorder/ps - 2.mp4"
+        self.start_camera_feed()
+
+    def stop_camera_feed(self):
+        if self.playing:
+            self.playing = False
+
+    def start_camera_feed_button(self):
+        if not self.playing:
+            self.playing = True
+            self.start_camera_feed()
+
+    def restart_camera_feed(self):
+        python = sys.executable
+        os.execl(python, python, *sys.argv)
+
+    def start_camera_feed(self):
+        self.capture_object = Detection(self.video_file)
+        t = threading.Thread(target=self.update_image)
+        t.daemon = True
+        t.start()
+
+    def update_image(self):
+        while self.playing:
+            frame = self.capture_object.get_frame()
+            if frame is not None:
+                resized_frame = cv2.resize(frame, (1400,650))
+                img = ImageTk.PhotoImage(image=Image.fromarray(resized_frame))
+                self.label.config(image=img)
+                self.label.image = img
+                time.sleep(0.05)
+
+    def show_menu(self, show=True):
+        if show:
+            self.menubar = tk.Menu(self.master)
+            self.master.config(menu=self.menubar)
+            self.file_menu = tk.Menu(self.menubar, tearoff=0)
+            self.file_menu.add_command(label="Start", command=self.start_camera_feed_button)
+            self.file_menu.add_command(label="Stop", command=self.stop_camera_feed)
+            self.file_menu.add_command(label="Restart", command=self.restart_camera_feed)
+            self.file_menu.add_separator()
+            self.file_menu.add_command(label="Show Records", command=self.show_records)
+            self.file_menu.add_separator()
+            self.file_menu.add_command(label="Configuration", command=self.configuration)
+            self.menubar.add_cascade(label="Tools", menu=self.file_menu)
+        else:
+            self.master.config(menu=None)
+
+    def configuration(self):
+        return "config"
+
+    def show_records(self):
+        return "record"
 
 
 if __name__ == "__main__":
