@@ -1,12 +1,17 @@
 import threading
+import time
 import tkinter as tk
 from tkinter import ttk
 from tkinter import messagebox
 import cv2
+import sys
+import subprocess
+import os
+from PIL import ImageTk, Image
 
 class Detection:
     def __init__(self, video_path):
-        self.cap = cv2.VideoCapture(1)
+        self.cap = cv2.VideoCapture("C:/Users/SIVA/Downloads/WhatsApp Video 2024-04-19 at 9.34.26 PM.mp4")
 
     def get_frame(self):
         ret, frame = self.cap.read()
@@ -30,6 +35,7 @@ class Application(tk.Tk):
         self.frames = {}
         self.login_frame = LoginPage(self)
         self.ip_address_frame = IPAddressPage(self)
+        self.welcome_frame = WelcomePage(self)
         self.show_frame("login")
 
     def show_frame(self, frame_name):
@@ -41,6 +47,13 @@ class Application(tk.Tk):
             self.login_frame.pack_forget()
             self.ip_address_frame.pack(fill='both', expand=True)
             self.welcome_frame.pack_forget()
+
+        elif frame_name == "welcome":
+            self.login_frame.pack_forget()
+            self.ip_address_frame.pack_forget()
+            self.welcome_frame.pack(fill='both', expand=True)
+            self.welcome_frame.show_menu()
+
 
 
 class LoginPage(ttk.Frame):
@@ -170,6 +183,76 @@ class IPAddressPage(ttk.Frame):
         else:
             print("Database couldn't be read")
 
+class WelcomePage(ttk.Frame):
+    def __init__(self, master):
+        super().__init__(master)
+        self.master = master
+
+        ht = self.winfo_screenheight()
+        const2 = int(ht / 86.4)
+        const3 = int(ht / 172.8)
+        self.const4 = int(ht / 21.6)
+        self.playing = True
+
+        self.frame = tk.Frame(self)
+        self.frame.grid(row=1, column=0, padx=const2, pady=const2)
+
+        self.label = tk.Label(self.frame)
+        self.label.grid(row=0, column=0, padx=const3, pady=const3)
+
+        self.video_file = "C:/Users/SIVA/OneDrive/Pictures/Icecream Screen Recorder/ps - 2.mp4"
+        self.start_camera_feed()
+
+    def stop_camera_feed(self):
+        if self.playing:
+            self.playing = False
+
+    def start_camera_feed_button(self):
+        if not self.playing:
+            self.playing = True
+            self.start_camera_feed()
+
+    def restart_camera_feed(self):
+        python = sys.executable
+        os.execl(python, python, *sys.argv)
+
+    def start_camera_feed(self):
+        self.capture_object = Detection(self.video_file)
+        t = threading.Thread(target=self.update_image)
+        t.daemon = True
+        t.start()
+
+    def update_image(self):
+        while self.playing:
+            frame = self.capture_object.get_frame()
+            if frame is not None:
+                resized_frame = cv2.resize(frame, (1400,650))
+                img = ImageTk.PhotoImage(image=Image.fromarray(resized_frame))
+                self.label.config(image=img)
+                self.label.image = img
+                time.sleep(0.05)
+
+    def show_menu(self, show=True):
+        if show:
+            self.menubar = tk.Menu(self.master)
+            self.master.config(menu=self.menubar)
+            self.file_menu = tk.Menu(self.menubar, tearoff=0)
+            self.file_menu.add_command(label="Start", command=self.start_camera_feed_button)
+            self.file_menu.add_command(label="Stop", command=self.stop_camera_feed)
+            self.file_menu.add_command(label="Restart", command=self.restart_camera_feed)
+            self.file_menu.add_separator()
+            self.file_menu.add_command(label="Show Records", command=self.show_records)
+            self.file_menu.add_separator()
+            self.file_menu.add_command(label="Configuration", command=self.configuration)
+            self.menubar.add_cascade(label="Tools", menu=self.file_menu)
+        else:
+            self.master.config(menu=None)
+
+    def configuration(self):
+        return "config"
+
+    def show_records(self):
+        return "record"
 
 
 if __name__ == "__main__":
