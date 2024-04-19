@@ -35,6 +35,8 @@ class Application(tk.Tk):
         self.frames = {}
         self.login_frame = LoginPage(self)
         self.ip_address_frame = IPAddressPage(self)
+        self.welcome_frame = WelcomePage(self)
+        self.show_frame("login")
 
     def show_frame(self, frame_name):
         if frame_name == "login":
