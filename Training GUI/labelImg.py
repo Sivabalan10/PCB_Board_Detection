@@ -539,6 +539,229 @@ class MainWindow(QMainWindow, WindowMixin):
         if self.file_path and os.path.isdir(self.file_path):
             self.open_dir_dialog(dir_path=self.file_path, silent=True)
 
+    def keyReleaseEvent(self, event):
+        if event.key() == Qt.Key_Control:
+            self.canvas.set_drawing_shape_to_square(False)
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Control:
+            # Draw rectangle if Ctrl is pressed
+            self.canvas.set_drawing_shape_to_square(True)
+
+    # Support Functions #
+    def set_format(self, save_format):
+        if save_format == FORMAT_PASCALVOC:
+            self.actions.save_format.setText(FORMAT_PASCALVOC)
+            self.actions.save_format.setIcon(new_icon("format_voc"))
+            self.label_file_format = LabelFileFormat.PASCAL_VOC
+            LabelFile.suffix = XML_EXT
+
+        elif save_format == FORMAT_YOLO:
+            self.actions.save_format.setText(FORMAT_YOLO)
+            self.actions.save_format.setIcon(new_icon("format_yolo"))
+            self.label_file_format = LabelFileFormat.YOLO
+            LabelFile.suffix = TXT_EXT
+
+        elif save_format == FORMAT_CREATEML:
+            self.actions.save_format.setText(FORMAT_CREATEML)
+            self.actions.save_format.setIcon(new_icon("format_createml"))
+            self.label_file_format = LabelFileFormat.CREATE_ML
+            LabelFile.suffix = JSON_EXT
+
+    def change_format(self):
+        if self.label_file_format == LabelFileFormat.PASCAL_VOC:
+            self.set_format(FORMAT_YOLO)
+        elif self.label_file_format == LabelFileFormat.YOLO:
+            self.set_format(FORMAT_CREATEML)
+        elif self.label_file_format == LabelFileFormat.CREATE_ML:
+            self.set_format(FORMAT_PASCALVOC)
+        else:
+            raise ValueError('Unknown label file format.')
+        self.set_dirty()
+
+    def no_shapes(self):
+        return not self.items_to_shapes
+
+    def toggle_advanced_mode(self, value=True):
+        self._beginner = not value
+        self.canvas.set_editing(True)
+        self.populate_mode_actions()
+        self.edit_button.setVisible(not value)
+        if value:
+            self.actions.createMode.setEnabled(True)
+            self.actions.editMode.setEnabled(False)
+            self.dock.setFeatures(self.dock.features() | self.dock_features)
+        else:
+            self.dock.setFeatures(self.dock.features() ^ self.dock_features)
+
+    def populate_mode_actions(self):
+        if self.beginner():
+            tool, menu = self.actions.beginner, self.actions.beginnerContext
+        else:
+            tool, menu = self.actions.advanced, self.actions.advancedContext
+        self.tools.clear()
+        add_actions(self.tools, tool)
+        self.canvas.menus[0].clear()
+        add_actions(self.canvas.menus[0], menu)
+        self.menus.edit.clear()
+        actions = (self.actions.create,) if self.beginner()\
+            else (self.actions.createMode, self.actions.editMode)
+        add_actions(self.menus.edit, actions + self.actions.editMenu)
+
+    def set_beginner(self):
+        self.tools.clear()
+        add_actions(self.tools, self.actions.beginner)
+
+    def set_advanced(self):
+        self.tools.clear()
+        add_actions(self.tools, self.actions.advanced)
+
+    def set_dirty(self):
+        self.dirty = True
+        self.actions.save.setEnabled(True)
+
+    def set_clean(self):
+        self.dirty = False
+        self.actions.save.setEnabled(False)
+        self.actions.create.setEnabled(True)
+
+    def toggle_actions(self, value=True):
+        """Enable/Disable widgets which depend on an opened image."""
+        for z in self.actions.zoomActions:
+            z.setEnabled(value)
+        for z in self.actions.lightActions:
+            z.setEnabled(value)
+        for action in self.actions.onLoadActive:
+            action.setEnabled(value)
+
+    def queue_event(self, function):
+        QTimer.singleShot(0, function)
+
+    def status(self, message, delay=5000):
+        self.statusBar().showMessage(message, delay)
+
+    def reset_state(self):
+        self.items_to_shapes.clear()
+        self.shapes_to_items.clear()
+        self.label_list.clear()
+        self.file_path = None
+        self.image_data = None
+        self.label_file = None
+        self.canvas.reset_state()
+        self.label_coordinates.clear()
+        self.combo_box.cb.clear()
+
+    def current_item(self):
+        items = self.label_list.selectedItems()
+        if items:
+            return items[0]
+        return None
+
+    def add_recent_file(self, file_path):
+        if file_path in self.recent_files:
+            self.recent_files.remove(file_path)
+        elif len(self.recent_files) >= self.max_recent:
+            self.recent_files.pop()
+        self.recent_files.insert(0, file_path)
+
+    def beginner(self):
+        return self._beginner
+
+    def advanced(self):
+        return not self.beginner()
+
+    def show_tutorial_dialog(self, browser='default', link=None):
+        if link is None:
+            link = self.screencast
+
+        if browser.lower() == 'default':
+            wb.open(link, new=2)
+        elif browser.lower() == 'chrome' and self.os_name == 'Windows':
+            if shutil.which(browser.lower()):  # 'chrome' not in wb._browsers in windows
+                wb.register('chrome', None, wb.BackgroundBrowser('chrome'))
+            else:
+                chrome_path="D:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"
+                if os.path.isfile(chrome_path):
+                    wb.register('chrome', None, wb.BackgroundBrowser(chrome_path))
+            try:
+                wb.get('chrome').open(link, new=2)
+            except:
+                wb.open(link, new=2)
+        elif browser.lower() in wb._browsers:
+            wb.get(browser.lower()).open(link, new=2)
+
+    def show_default_tutorial_dialog(self):
+        self.show_tutorial_dialog(browser='default')
+
+    def show_info_dialog(self):
+        from libs.__init__ import __version__
+        msg = u'Name:{0} \nApp Version:{1} \n{2} '.format(__appname__, __version__, sys.version_info)
+        QMessageBox.information(self, u'Information', msg)
+
+    def show_shortcuts_dialog(self):
+        self.show_tutorial_dialog(browser='default', link='https://github.com/tzutalin/labelImg#Hotkeys')
+
+    def create_shape(self):
+        assert self.beginner()
+        self.canvas.set_editing(False)
+        self.actions.create.setEnabled(False)
+
+    def toggle_drawing_sensitive(self, drawing=True):
+        """In the middle of drawing, toggling between modes should be disabled."""
+        self.actions.editMode.setEnabled(not drawing)
+        if not drawing and self.beginner():
+            # Cancel creation.
+            print('Cancel creation.')
+            self.canvas.set_editing(True)
+            self.canvas.restore_cursor()
+            self.actions.create.setEnabled(True)
+
+    def toggle_draw_mode(self, edit=True):
+        self.canvas.set_editing(edit)
+        self.actions.createMode.setEnabled(edit)
+        self.actions.editMode.setEnabled(not edit)
+
+    def set_create_mode(self):
+        assert self.advanced()
+        self.toggle_draw_mode(False)
+
+    def set_edit_mode(self):
+        assert self.advanced()
+        self.toggle_draw_mode(True)
+        self.label_selection_changed()
+
+    def update_file_menu(self):
+        curr_file_path = self.file_path
+
+        def exists(filename):
+            return os.path.exists(filename)
+        menu = self.menus.recentFiles
+        menu.clear()
+        files = [f for f in self.recent_files if f !=
+                 curr_file_path and exists(f)]
+        for i, f in enumerate(files):
+            icon = new_icon('labels')
+            action = QAction(
+                icon, '&%d %s' % (i + 1, QFileInfo(f).fileName()), self)
+            action.triggered.connect(partial(self.load_recent, f))
+            menu.addAction(action)
+
+    def pop_label_list_menu(self, point):
+        self.menus.labelList.exec_(self.label_list.mapToGlobal(point))
+
+    def edit_label(self):
+        if not self.canvas.editing():
+            return
+        item = self.current_item()
+        if not item:
+            return
+        text = self.label_dialog.pop_up(item.text())
+        if text is not None:
+            item.setText(text)
+            item.setBackground(generate_color_by_text(text))
+            self.set_dirty()
+            self.update_combo_box()
+
     
 
 
