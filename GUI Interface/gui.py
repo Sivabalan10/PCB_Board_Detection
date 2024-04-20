@@ -1,15 +1,25 @@
-import sqlite3
 import threading
-import time
 import tkinter as tk
 from tkinter import ttk
 from tkinter import messagebox
+import sqlite3
 import cv2
-import sys
-import subprocess
+import wmi as wmi
+import pythoncom
 import os
+from datetime import datetime
 from PIL import ImageTk, Image
+from tkcalendar import DateEntry
+from ultralytics import YOLO
+import time
+import warnings
+import subprocess
+import webbrowser
+import sys
+from pycomm3 import LogixDriver
 
+
+# Creating database ----------------------------------------------------------------------------------------------------
 
 def create_database_and_tables():
     conn = sqlite3.connect('config.db')
@@ -76,6 +86,7 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
+
 def login_post(user, password_1):
     username = user
     password = password_1
@@ -103,12 +114,150 @@ def login_post(user, password_1):
     finally:
         conn.close()
 
-# --------------------------------------------------------------------------------------------
+
+def get_system_id():
+    try:
+        pythoncom.CoInitialize()
+        c = wmi.WMI()
+        for system in c.Win32_ComputerSystemProduct():
+            system_info = system.UUID
+            print(system_info)
+
+    except Exception as e:
+        print(f"Error: {e}")
+        system_info = "0"
+
+    finally:
+        pythoncom.CoUninitialize()
+
+    return system_info
+
+
+def add_uuid_to_users(uuid, username):
+    print("added uuid")
+    conn = sqlite3.connect('config.db')
+    cursor = conn.cursor()
+    cursor.execute('''UPDATE users SET uuid = ?, initial_state = 0 WHERE username = ?''', (uuid, username))
+    conn.commit()
+    conn.close()
+
+    print(f"UUID '{uuid}' added to users table for username '{username}' with initial state 0.")
+
+
+def check_uuid_and_initial_state(uuid, username):
+    print("Checking uuid.........")
+    conn = sqlite3.connect('config.db')
+    cursor = conn.cursor()
+    print(uuid)
+    cursor.execute('''SELECT uuid, initial_state FROM users WHERE uuid = ?''', (uuid,))
+    user_data = cursor.fetchone()
+    conn.close()
+
+    if user_data is None:
+        add_uuid_to_users(uuid, username)
+        return "Load"
+    else:
+        _, initial_state = user_data
+        if initial_state == 1:
+            return "Live"
+        else:
+            return "Load"  
+
+
+def update_initial_state(uuid, new_state):
+    conn = sqlite3.connect('config.db')
+    cursor = conn.cursor()
+    cursor.execute('''UPDATE users SET initial_state = ? WHERE uuid = ?''', (new_state, uuid))
+    conn.commit()
+    conn.close()
+
+    print(f"Initial state for user '{uuid}' updated successfully.")
+
+
+def store_camera_ips(ip1, plcip, plcport):
+    conn = sqlite3.connect('config.db')
+    cursor = conn.cursor()
+    cursor.execute('''INSERT INTO cameras (ip1, plcip, plcport)
+                      VALUES (?, ?, ?)''', (ip1, plcip, plcport))
+    conn.commit()
+    conn.close()
+
+
+def retrieve_ip(camera):
+    conn = sqlite3.connect('config.db')
+    cursor = conn.cursor()
+    if camera == 0:
+        cursor.execute("""
+                SELECT ip1  
+                FROM cameras
+                LIMIT 1
+            """)
+    
+
+    ip = cursor.fetchone()
+    print(ip)  
+    conn.close()
+    return ip[0] if ip else None
+
+
+def insert_record(camera, no_of_tyres_jammed, screenshot_location=""):
+    if camera == "" or no_of_tyres_jammed == "":
+        return
+    conn = sqlite3.connect('config.db')
+    cursor = conn.cursor()
+    timestamp = datetime.now()
+    sql_command = '''INSERT INTO records (camera, screenshot_location, timestamp, No_of_Tyres_Jammed)
+                        VALUES (?, ?, ?, ?)'''
+    cursor.execute(sql_command, (camera, screenshot_location, timestamp, no_of_tyres_jammed))
+    conn.commit()
+    conn.close()
+
+
+def retrieve_jam_check_time():
+    try:
+        conn = sqlite3.connect('config.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM cameras LIMIT 1")
+        row = cursor.fetchone()
+        if row:
+            index_of_jam_check_time = cursor.description.index(('jam_check_time', None, None, None, None, None, None))
+            jam_check_time = row[index_of_jam_check_time]
+            print(jam_check_time, "adaf")
+            if (jam_check_time == None or jam_check_time == ''):
+                jam_check_time = 40
+            return int(jam_check_time)
+        else:
+            return 40
+    except sqlite3.Error as e:
+        print("SQLite error:", e)
+    finally:
+        if conn:
+            conn.close()
+
+
+# ----------------------------------------------------------------------------------------------------------------------
 create_database_and_tables()
+create_table()
+
 
 class Detection:
     def __init__(self, video_path):
-        self.cap = cv2.VideoCapture("C:/Users/SIVA/Downloads/WhatsApp Video 2024-04-19 at 9.34.26 PM.mp4")
+        self.video_path = "videos\\video4.ts"
+        ip = retrieve_ip(0)
+        print("The ip address is",ip)
+        conn = sqlite3.connect('config.db')
+        cursor = conn.cursor()
+        cursor.execute('''SELECT model_1 FROM model LIMIT 1''')
+        first_row = cursor.fetchone()
+        conn.close()
+        if first_row:
+            model_name = first_row[0]
+            print(model_name)
+        else:
+            print("No data found in the 'model' table.")
+
+
+        self.cap = cv2.VideoCapture(0)
 
     def get_frame(self):
         ret, frame = self.cap.read()
@@ -143,15 +292,13 @@ class Application(tk.Tk):
         elif frame_name == "ip_address":
             self.login_frame.pack_forget()
             self.ip_address_frame.pack(fill='both', expand=True)
-          
+            self.welcome_frame.pack_forget()
 
         elif frame_name == "welcome":
             self.login_frame.pack_forget()
             self.ip_address_frame.pack_forget()
             self.welcome_frame.pack(fill='both', expand=True)
             self.welcome_frame.show_menu()
-
-
 
 class LoginPage(ttk.Frame):
     def __init__(self, master):
@@ -193,7 +340,9 @@ class LoginPage(ttk.Frame):
         login_status = login_post(username, password)
         if login_status:
             messagebox.showinfo("Login Successful", "Welcome, " + username + "!")
-            val = "Live"
+            current_uuid = get_system_id()
+            print(current_uuid)
+            val = check_uuid_and_initial_state(current_uuid, username)
             if val == "Load":
                 self.master.show_frame("ip_address")
             elif val == "Live":
@@ -208,13 +357,13 @@ class LoginPage(ttk.Frame):
 class IPAddressPage(ttk.Frame):
     def __init__(self, master):
         super().__init__(master)
-        self.count = 2  
+        self.count = 2  # 2- indicates null 
         height = self.winfo_screenheight()
         const1 = int(height / 72)  # 12
         const3 = int(height / 43.2)  # 20
         const2 = int(height / 57.6)  # 15
         const4 = int(height / 54)  # 16
-        label = ttk.Label(self, text="IP Address", font=('Helvetica', 20)) 
+        label = ttk.Label(self, text="IP Address", font=('Helvetica', 20))  
         label.pack(pady=(100, 20))
         ip_frame = ttk.Frame(self)
         ip_frame.pack(pady=10)
@@ -247,13 +396,17 @@ class IPAddressPage(ttk.Frame):
             button_font = ("Times New Roman", const2)
             style = ttk.Style()
             style.configure('proceed.TButton', font=button_font)
-
         
 
     def handle_proceed(self):
         print(self.count)
         if self.count == 1:
             ip1 = self.ip_entries[0].get()
+            plcip = "172.16.200"
+            plcport = 5000
+            store_camera_ips(ip1,plcip, plcport)
+            sys_uuid = get_system_id()
+            update_initial_state(sys_uuid, 1)
             self.master.show_frame("welcome")
         elif self.count == 0:
             messagebox.showerror("IP Failed", "Check the ip address")
@@ -261,8 +414,9 @@ class IPAddressPage(ttk.Frame):
 
 
     def handle_test(self, index):
-        ip_address = self.ip_entries[index].get()  
+        ip_address = self.ip_entries[index].get() 
         print("Testing IP:", ip_address)
+
         camera_url = ip_address
         try:
             cap = cv2.VideoCapture(camera_url)
@@ -288,6 +442,7 @@ class IPAddressPage(ttk.Frame):
         else:
             print("Database couldn't be read")
 
+
 class WelcomePage(ttk.Frame):
     def __init__(self, master):
         super().__init__(master)
@@ -305,7 +460,7 @@ class WelcomePage(ttk.Frame):
         self.label = tk.Label(self.frame)
         self.label.grid(row=0, column=0, padx=const3, pady=const3)
 
-        self.video_file = "C:/Users/SIVA/OneDrive/Pictures/Icecream Screen Recorder/ps - 2.mp4"
+        self.video_file = retrieve_ip(0)
         self.start_camera_feed()
 
     def stop_camera_feed(self):
@@ -335,7 +490,7 @@ class WelcomePage(ttk.Frame):
                 img = ImageTk.PhotoImage(image=Image.fromarray(resized_frame))
                 self.label.config(image=img)
                 self.label.image = img
-                time.sleep(0.05)
+                # time.sleep(0.01)
 
     def show_menu(self, show=True):
         if show:
@@ -354,10 +509,19 @@ class WelcomePage(ttk.Frame):
             self.master.config(menu=None)
 
     def configuration(self):
-        return "config"
+        script_path = os.path.abspath('configuration.py')
+        if os.path.exists(script_path):
+            try:
+                subprocess.Popen(['Python', script_path]) # Temporarily not working,having issue in system.
+            except Exception as e:
+                print("An error occurred:", e)
+        else:
+            print("Script 'configuration.py' not found in the current directory.")
 
     def show_records(self):
-        return "record"
+        records_page = self.create_records_page(self.master)
+        records_page.grid(row=1, column=0, padx=self.const4, pady=self.const4)
+
 
 
 if __name__ == "__main__":
