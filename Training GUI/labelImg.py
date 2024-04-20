@@ -762,7 +762,487 @@ class MainWindow(QMainWindow, WindowMixin):
             self.set_dirty()
             self.update_combo_box()
 
-    
+
+    # Tzutalin 20160906 : Add file list and dock to move faster
+    def file_item_double_clicked(self, item=None):
+        self.cur_img_idx = self.m_img_list.index(ustr(item.text()))
+        filename = self.m_img_list[self.cur_img_idx]
+        if filename:
+            self.load_file(filename)
+
+    # Add chris
+    def button_state(self, item=None):
+        """ Function to handle difficult examples
+        Update on each object """
+        if not self.canvas.editing():
+            return
+
+        item = self.current_item()
+        if not item:  # If not selected Item, take the first one
+            item = self.label_list.item(self.label_list.count() - 1)
+
+        difficult = self.diffc_button.isChecked()
+
+        try:
+            shape = self.items_to_shapes[item]
+        except:
+            pass
+        # Checked and Update
+        try:
+            if difficult != shape.difficult:
+                shape.difficult = difficult
+                self.set_dirty()
+            else:  # User probably changed item visibility
+                self.canvas.set_shape_visible(shape, item.checkState() == Qt.Checked)
+        except:
+            pass
+
+    # React to canvas signals.
+    def shape_selection_changed(self, selected=False):
+        if self._no_selection_slot:
+            self._no_selection_slot = False
+        else:
+            shape = self.canvas.selected_shape
+            if shape:
+                self.shapes_to_items[shape].setSelected(True)
+            else:
+                self.label_list.clearSelection()
+        self.actions.delete.setEnabled(selected)
+        self.actions.copy.setEnabled(selected)
+        self.actions.edit.setEnabled(selected)
+        self.actions.shapeLineColor.setEnabled(selected)
+        self.actions.shapeFillColor.setEnabled(selected)
+
+    def add_label(self, shape):
+        shape.paint_label = self.display_label_option.isChecked()
+        item = HashableQListWidgetItem(shape.label)
+        item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+        item.setCheckState(Qt.Checked)
+        item.setBackground(generate_color_by_text(shape.label))
+        self.items_to_shapes[item] = shape
+        self.shapes_to_items[shape] = item
+        self.label_list.addItem(item)
+        for action in self.actions.onShapesPresent:
+            action.setEnabled(True)
+        self.update_combo_box()
+
+    def remove_label(self, shape):
+        if shape is None:
+            # print('rm empty label')
+            return
+        item = self.shapes_to_items[shape]
+        self.label_list.takeItem(self.label_list.row(item))
+        del self.shapes_to_items[shape]
+        del self.items_to_shapes[item]
+        self.update_combo_box()
+
+    def load_labels(self, shapes):
+        s = []
+        for label, points, line_color, fill_color, difficult in shapes:
+            shape = Shape(label=label)
+            for x, y in points:
+
+                # Ensure the labels are within the bounds of the image. If not, fix them.
+                x, y, snapped = self.canvas.snap_point_to_canvas(x, y)
+                if snapped:
+                    self.set_dirty()
+
+                shape.add_point(QPointF(x, y))
+            shape.difficult = difficult
+            shape.close()
+            s.append(shape)
+
+            if line_color:
+                shape.line_color = QColor(*line_color)
+            else:
+                shape.line_color = generate_color_by_text(label)
+
+            if fill_color:
+                shape.fill_color = QColor(*fill_color)
+            else:
+                shape.fill_color = generate_color_by_text(label)
+
+            self.add_label(shape)
+        self.update_combo_box()
+        self.canvas.load_shapes(s)
+
+    def update_combo_box(self):
+        # Get the unique labels and add them to the Combobox.
+        items_text_list = [str(self.label_list.item(i).text()) for i in range(self.label_list.count())]
+
+        unique_text_list = list(set(items_text_list))
+        # Add a null row for showing all the labels
+        unique_text_list.append("")
+        unique_text_list.sort()
+
+        self.combo_box.update_items(unique_text_list)
+
+    def save_labels(self, annotation_file_path):
+        annotation_file_path = ustr(annotation_file_path)
+        if self.label_file is None:
+            self.label_file = LabelFile()
+            self.label_file.verified = self.canvas.verified
+
+        def format_shape(s):
+            return dict(label=s.label,
+                        line_color=s.line_color.getRgb(),
+                        fill_color=s.fill_color.getRgb(),
+                        points=[(p.x(), p.y()) for p in s.points],
+                        # add chris
+                        difficult=s.difficult)
+
+        shapes = [format_shape(shape) for shape in self.canvas.shapes]
+        # Can add different annotation formats here
+        try:
+            if self.label_file_format == LabelFileFormat.PASCAL_VOC:
+                if annotation_file_path[-4:].lower() != ".xml":
+                    annotation_file_path += XML_EXT
+                self.label_file.save_pascal_voc_format(annotation_file_path, shapes, self.file_path, self.image_data,
+                                                       self.line_color.getRgb(), self.fill_color.getRgb())
+            elif self.label_file_format == LabelFileFormat.YOLO:
+                if annotation_file_path[-4:].lower() != ".txt":
+                    annotation_file_path += TXT_EXT
+                self.label_file.save_yolo_format(annotation_file_path, shapes, self.file_path, self.image_data, self.label_hist,
+                                                 self.line_color.getRgb(), self.fill_color.getRgb())
+            elif self.label_file_format == LabelFileFormat.CREATE_ML:
+                if annotation_file_path[-5:].lower() != ".json":
+                    annotation_file_path += JSON_EXT
+                self.label_file.save_create_ml_format(annotation_file_path, shapes, self.file_path, self.image_data,
+                                                      self.label_hist, self.line_color.getRgb(), self.fill_color.getRgb())
+            else:
+                self.label_file.save(annotation_file_path, shapes, self.file_path, self.image_data,
+                                     self.line_color.getRgb(), self.fill_color.getRgb())
+            print('Image:{0} -> Annotation:{1}'.format(self.file_path, annotation_file_path))
+            return True
+        except LabelFileError as e:
+            self.error_message(u'Error saving label data', u'<b>%s</b>' % e)
+            return False
+
+    def copy_selected_shape(self):
+        self.add_label(self.canvas.copy_selected_shape())
+        # fix copy and delete
+        self.shape_selection_changed(True)
+
+    def combo_selection_changed(self, index):
+        text = self.combo_box.cb.itemText(index)
+        for i in range(self.label_list.count()):
+            if text == "":
+                self.label_list.item(i).setCheckState(2)
+            elif text != self.label_list.item(i).text():
+                self.label_list.item(i).setCheckState(0)
+            else:
+                self.label_list.item(i).setCheckState(2)
+
+    def default_label_combo_selection_changed(self, index):
+        self.default_label=self.label_hist[index]
+
+    def label_selection_changed(self):
+        item = self.current_item()
+        if item and self.canvas.editing():
+            self._no_selection_slot = True
+            self.canvas.select_shape(self.items_to_shapes[item])
+            shape = self.items_to_shapes[item]
+            # Add Chris
+            self.diffc_button.setChecked(shape.difficult)
+
+    def label_item_changed(self, item):
+        shape = self.items_to_shapes[item]
+        label = item.text()
+        if label != shape.label:
+            shape.label = item.text()
+            shape.line_color = generate_color_by_text(shape.label)
+            self.set_dirty()
+        else:  # User probably changed item visibility
+            self.canvas.set_shape_visible(shape, item.checkState() == Qt.Checked)
+
+    # Callback functions:
+    def new_shape(self):
+        """Pop-up and give focus to the label editor.
+
+        position MUST be in global coordinates.
+        """
+        if not self.use_default_label_checkbox.isChecked():
+            if len(self.label_hist) > 0:
+                self.label_dialog = LabelDialog(
+                    parent=self, list_item=self.label_hist)
+
+            # Sync single class mode from PR#106
+            if self.single_class_mode.isChecked() and self.lastLabel:
+                text = self.lastLabel
+            else:
+                text = self.label_dialog.pop_up(text=self.prev_label_text)
+                self.lastLabel = text
+        else:
+            text = self.default_label
+
+        # Add Chris
+        self.diffc_button.setChecked(False)
+        if text is not None:
+            self.prev_label_text = text
+            generate_color = generate_color_by_text(text)
+            shape = self.canvas.set_last_label(text, generate_color, generate_color)
+            self.add_label(shape)
+            if self.beginner():  # Switch to edit mode.
+                self.canvas.set_editing(True)
+                self.actions.create.setEnabled(True)
+            else:
+                self.actions.editMode.setEnabled(True)
+            self.set_dirty()
+
+            if text not in self.label_hist:
+                self.label_hist.append(text)
+        else:
+            # self.canvas.undoLastLine()
+            self.canvas.reset_all_lines()
+
+    def scroll_request(self, delta, orientation):
+        units = - delta / (8 * 15)
+        bar = self.scroll_bars[orientation]
+        bar.setValue(int(bar.value() + bar.singleStep() * units))
+
+    def set_zoom(self, value):
+        self.actions.fitWidth.setChecked(False)
+        self.actions.fitWindow.setChecked(False)
+        self.zoom_mode = self.MANUAL_ZOOM
+        # Arithmetic on scaling factor often results in float
+        # Convert to int to avoid type errors
+        self.zoom_widget.setValue(int(value))
+
+    def add_zoom(self, increment=10):
+        self.set_zoom(self.zoom_widget.value() + increment)
+
+    def zoom_request(self, delta):
+        # get the current scrollbar positions
+        # calculate the percentages ~ coordinates
+        h_bar = self.scroll_bars[Qt.Horizontal]
+        v_bar = self.scroll_bars[Qt.Vertical]
+
+        # get the current maximum, to know the difference after zooming
+        h_bar_max = h_bar.maximum()
+        v_bar_max = v_bar.maximum()
+
+        # get the cursor position and canvas size
+        # calculate the desired movement from 0 to 1
+        # where 0 = move left
+        #       1 = move right
+        # up and down analogous
+        cursor = QCursor()
+        pos = cursor.pos()
+        relative_pos = QWidget.mapFromGlobal(self, pos)
+
+        cursor_x = relative_pos.x()
+        cursor_y = relative_pos.y()
+
+        w = self.scroll_area.width()
+        h = self.scroll_area.height()
+
+        # the scaling from 0 to 1 has some padding
+        # you don't have to hit the very leftmost pixel for a maximum-left movement
+        margin = 0.1
+        move_x = (cursor_x - margin * w) / (w - 2 * margin * w)
+        move_y = (cursor_y - margin * h) / (h - 2 * margin * h)
+
+        # clamp the values from 0 to 1
+        move_x = min(max(move_x, 0), 1)
+        move_y = min(max(move_y, 0), 1)
+
+        # zoom in
+        units = delta // (8 * 15)
+        scale = 10
+        self.add_zoom(scale * units)
+
+        # get the difference in scrollbar values
+        # this is how far we can move
+        d_h_bar_max = h_bar.maximum() - h_bar_max
+        d_v_bar_max = v_bar.maximum() - v_bar_max
+
+        # get the new scrollbar values
+        new_h_bar_value = int(h_bar.value() + move_x * d_h_bar_max)
+        new_v_bar_value = int(v_bar.value() + move_y * d_v_bar_max)
+
+        h_bar.setValue(new_h_bar_value)
+        v_bar.setValue(new_v_bar_value)
+
+    def light_request(self, delta):
+        self.add_light(5*delta // (8 * 15))
+
+    def set_fit_window(self, value=True):
+        if value:
+            self.actions.fitWidth.setChecked(False)
+        self.zoom_mode = self.FIT_WINDOW if value else self.MANUAL_ZOOM
+        self.adjust_scale()
+
+    def set_fit_width(self, value=True):
+        if value:
+            self.actions.fitWindow.setChecked(False)
+        self.zoom_mode = self.FIT_WIDTH if value else self.MANUAL_ZOOM
+        self.adjust_scale()
+
+    def set_light(self, value):
+        self.actions.lightOrg.setChecked(int(value) == 50)
+        # Arithmetic on scaling factor often results in float
+        # Convert to int to avoid type errors
+        self.light_widget.setValue(int(value))
+
+    def add_light(self, increment=10):
+        self.set_light(self.light_widget.value() + increment)
+
+    def toggle_polygons(self, value):
+        for item, shape in self.items_to_shapes.items():
+            item.setCheckState(Qt.Checked if value else Qt.Unchecked)
+
+    def load_file(self, file_path=None):
+        """Load the specified file, or the last opened file if None."""
+        self.reset_state()
+        self.canvas.setEnabled(False)
+        if file_path is None:
+            file_path = self.settings.get(SETTING_FILENAME)
+        # Make sure that filePath is a regular python string, rather than QString
+        file_path = ustr(file_path)
+
+        # Fix bug: An  index error after select a directory when open a new file.
+        unicode_file_path = ustr(file_path)
+        unicode_file_path = os.path.abspath(unicode_file_path)
+        # Tzutalin 20160906 : Add file list and dock to move faster
+        # Highlight the file item
+        if unicode_file_path and self.file_list_widget.count() > 0:
+            if unicode_file_path in self.m_img_list:
+                index = self.m_img_list.index(unicode_file_path)
+                file_widget_item = self.file_list_widget.item(index)
+                file_widget_item.setSelected(True)
+            else:
+                self.file_list_widget.clear()
+                self.m_img_list.clear()
+
+        if unicode_file_path and os.path.exists(unicode_file_path):
+            if LabelFile.is_label_file(unicode_file_path):
+                try:
+                    self.label_file = LabelFile(unicode_file_path)
+                except LabelFileError as e:
+                    self.error_message(u'Error opening file',
+                                       (u"<p><b>%s</b></p>"
+                                        u"<p>Make sure <i>%s</i> is a valid label file.")
+                                       % (e, unicode_file_path))
+                    self.status("Error reading %s" % unicode_file_path)
+                    
+                    return False
+                self.image_data = self.label_file.image_data
+                self.line_color = QColor(*self.label_file.lineColor)
+                self.fill_color = QColor(*self.label_file.fillColor)
+                self.canvas.verified = self.label_file.verified
+            else:
+                # Load image:
+                # read data first and store for saving into label file.
+                self.image_data = read(unicode_file_path, None)
+                self.label_file = None
+                self.canvas.verified = False
+
+            if isinstance(self.image_data, QImage):
+                image = self.image_data
+            else:
+                image = QImage.fromData(self.image_data)
+            if image.isNull():
+                self.error_message(u'Error opening file',
+                                   u"<p>Make sure <i>%s</i> is a valid image file." % unicode_file_path)
+                self.status("Error reading %s" % unicode_file_path)
+                return False
+            self.status("Loaded %s" % os.path.basename(unicode_file_path))
+            self.image = image
+            self.file_path = unicode_file_path
+            self.canvas.load_pixmap(QPixmap.fromImage(image))
+            if self.label_file:
+                self.load_labels(self.label_file.shapes)
+            self.set_clean()
+            self.canvas.setEnabled(True)
+            self.adjust_scale(initial=True)
+            self.paint_canvas()
+            self.add_recent_file(self.file_path)
+            self.toggle_actions(True)
+            self.show_bounding_box_from_annotation_file(self.file_path)
+
+            counter = self.counter_str()
+            self.setWindowTitle(__appname__ + ' ' + file_path + ' ' + counter)
+
+            # Default : select last item if there is at least one item
+            if self.label_list.count():
+                self.label_list.setCurrentItem(self.label_list.item(self.label_list.count() - 1))
+                self.label_list.item(self.label_list.count() - 1).setSelected(True)
+
+            self.canvas.setFocus(True)
+            return True
+        return False
+
+    def counter_str(self):
+        """
+        Converts image counter to string representation.
+        """
+        return '[{} / {}]'.format(self.cur_img_idx + 1, self.img_count)
+
+    def show_bounding_box_from_annotation_file(self, file_path):
+        if self.default_save_dir is not None:
+            basename = os.path.basename(os.path.splitext(file_path)[0])
+            xml_path = os.path.join(self.default_save_dir, basename + XML_EXT)
+            txt_path = os.path.join(self.default_save_dir, basename + TXT_EXT)
+            json_path = os.path.join(self.default_save_dir, basename + JSON_EXT)
+
+            """Annotation file priority:
+            PascalXML > YOLO
+            """
+            if os.path.isfile(xml_path):
+                self.load_pascal_xml_by_filename(xml_path)
+            elif os.path.isfile(txt_path):
+                self.load_yolo_txt_by_filename(txt_path)
+            elif os.path.isfile(json_path):
+                self.load_create_ml_json_by_filename(json_path, file_path)
+
+        else:
+            xml_path = os.path.splitext(file_path)[0] + XML_EXT
+            txt_path = os.path.splitext(file_path)[0] + TXT_EXT
+            json_path = os.path.splitext(file_path)[0] + JSON_EXT
+
+            if os.path.isfile(xml_path):
+                self.load_pascal_xml_by_filename(xml_path)
+            elif os.path.isfile(txt_path):
+                self.load_yolo_txt_by_filename(txt_path)
+            elif os.path.isfile(json_path):
+                self.load_create_ml_json_by_filename(json_path, file_path)
+            
+
+    def resizeEvent(self, event):
+        if self.canvas and not self.image.isNull()\
+           and self.zoom_mode != self.MANUAL_ZOOM:
+            self.adjust_scale()
+        super(MainWindow, self).resizeEvent(event)
+
+    def paint_canvas(self):
+        assert not self.image.isNull(), "cannot paint null image"
+        self.canvas.scale = 0.01 * self.zoom_widget.value()
+        self.canvas.overlay_color = self.light_widget.color()
+        self.canvas.label_font_size = int(0.02 * max(self.image.width(), self.image.height()))
+        self.canvas.adjustSize()
+        self.canvas.update()
+
+    def adjust_scale(self, initial=False):
+        value = self.scalers[self.FIT_WINDOW if initial else self.zoom_mode]()
+        self.zoom_widget.setValue(int(100 * value))
+
+    def scale_fit_window(self):
+        """Figure out the size of the pixmap in order to fit the main widget."""
+        e = 2.0  # So that no scrollbars are generated.
+        w1 = self.centralWidget().width() - e
+        h1 = self.centralWidget().height() - e
+        a1 = w1 / h1
+        # Calculate a new scale value based on the pixmap's aspect ratio.
+        w2 = self.canvas.pixmap.width() - 0.0
+        h2 = self.canvas.pixmap.height() - 0.0
+        a2 = w2 / h2
+        return w1 / w2 if a2 >= a1 else h1 / h2
+
+    def scale_fit_width(self):
+        # The epsilon does not seem to work too well here.
+        w = self.centralWidget().width() - 2.0
+        return w / self.canvas.pixmap.width()
+
 
 
 def main():
