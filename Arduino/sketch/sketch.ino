@@ -30,7 +30,7 @@ LiquidCrystal_I2C lcd(0x27,20,4);
 int extended_angle = 0; // intial angle womp womp 
 int retracted_angle = 0;
 
-
+String cause;
 
 void setup() {
   
@@ -92,10 +92,10 @@ void WriteAngle()
 {
     lcd.clear();
     lcd.setCursor(0,0);
-    lcd.print("Defect detected!");
+    lcd.print(cause);
     digitalWrite(ERR_LED,HIGH);
     digitalWrite(GRR_LED,LOW);
-    Serial.println("defected detected!!");
+    Serial.println(cause);
     arm.write(extended_angle);
     delay(1000);
     arm.write(retracted_angle);
@@ -112,29 +112,35 @@ void handle30()
 {
   extended_angle = 30;
   WriteAngle();
+  cause = "capacitor defect";
 }
 void handle60()
 {
   extended_angle = 60;
   WriteAngle();
+  cause = "resistor defect";
 }
 void handle90()
 {
   extended_angle = 90;
   WriteAngle();
+  cause = "regulator defect";
 }
 void handle120()
 {
   extended_angle = 120;
   WriteAngle();
+  cause = "switch defect";
 }
 void handle150()
 {
   extended_angle = 150;
   WriteAngle();
+  cause = "transistor defect";
 }
 void handle180()
 {
   extended_angle = 180;
   WriteAngle();
+  cause = "LED defect";
 }
