@@ -4,6 +4,7 @@ from tkinter import ttk
 from tkinter import messagebox
 import sqlite3
 import cv2
+import requests
 import wmi as wmi
 import pythoncom
 import os
@@ -14,11 +15,10 @@ from ultralytics import YOLO
 import time
 import warnings
 import subprocess
+import shutil
 import webbrowser
 import sys
 from pycomm3 import LogixDriver
-
-
 # Creating database ----------------------------------------------------------------------------------------------------
 
 def create_database_and_tables():
@@ -239,6 +239,32 @@ def retrieve_jam_check_time():
 create_database_and_tables()
 create_table()
 
+def visit_ip(ip_address):
+    print("sds")
+    try:
+        response = requests.get(f"http://{ip_address}")
+        if response.status_code == 200:
+            print(f"Successfully visited {ip_address}")
+        else:
+            print(f"Failed to visit {ip_address}. Status code: {response.status_code}")
+    except requests.RequestException as e:
+        print(f"Failed to visit {ip_address}. Error: {e}")
+
+def main1():
+    ip_addresses = ["192.168.234.74/3", "192.168.234.74/0"]  # Replace x.x.x.x and y.y.y.y with your actual IP addresses
+    for ip in ip_addresses:
+        visit_ip(ip)
+
+def main2():
+    ip_addresses = ["192.168.234.74/1", "192.168.234.74/0"]  # Replace x.x.x.x and y.y.y.y with your actual IP addresses
+    for ip in ip_addresses:
+        visit_ip(ip)
+
+def main3():
+    ip_addresses = ["192.168.234.74/5", "192.168.234.74/0"]  # Replace x.x.x.x and y.y.y.y with your actual IP addresses
+    for ip in ip_addresses:
+        visit_ip(ip)
+count = 0
 
 class Detection:
     def __init__(self, video_path):
@@ -257,13 +283,43 @@ class Detection:
             print("No data found in the 'model' table.")
 
 
-        self.cap = cv2.VideoCapture(0)
+        self.cap = cv2.VideoCapture(1)
 
     def get_frame(self):
+        global count
         ret, frame = self.cap.read()
-        if not ret:
-            return None
-        return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        if ret:
+            model = YOLO('main_sorter.pt')
+            results = model(frame)
+            annotated_frame = results[0].plot()
+            lis = results[0].verbose().split(',')
+            print(lis)
+
+            if len(lis) == 8:
+                cv2.rectangle(annotated_frame, (30, 20), (200, 70), (0, 0, 0), -1)
+                cv2.putText(annotated_frame, "ALL OK", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+            else:
+                if ' 1 regulator' not in lis:
+                    cv2.rectangle(annotated_frame, (30, 20), (400, 70), (0, 0, 0), -1)
+                    cv2.putText(annotated_frame, "Regulator Missing", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                    if count==0:
+                        count+=1
+                        main1()
+                    
+
+                elif ' 1 capacitor' not in lis:
+                    cv2.rectangle(annotated_frame, (30, 20), (400, 70), (0, 0, 0), -1)
+                    cv2.putText(annotated_frame, "Capacitor Missing", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                    if count==0:
+                        count+=1
+                        main2()
+                elif ' 1 transistor' not in lis:
+                    cv2.rectangle(annotated_frame, (30, 20), (400, 70), (0, 0, 0), -1)
+                    cv2.putText(annotated_frame, "Transistor Missing", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                    if count==0:
+                        count+=1
+                        main3()
+        return cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
 
 class Application(tk.Tk):
     def __init__(self):
@@ -473,8 +529,9 @@ class WelcomePage(ttk.Frame):
             self.start_camera_feed()
 
     def restart_camera_feed(self):
-        python = sys.executable
-        os.execl(python, python, *sys.argv)
+        global count
+        count = 0
+        
 
     def start_camera_feed(self):
         self.capture_object = Detection(self.video_file)
@@ -486,7 +543,7 @@ class WelcomePage(ttk.Frame):
         while self.playing:
             frame = self.capture_object.get_frame()
             if frame is not None:
-                resized_frame = cv2.resize(frame, (1400,650))
+                resized_frame = cv2.resize(frame, (1000,700))
                 img = ImageTk.PhotoImage(image=Image.fromarray(resized_frame))
                 self.label.config(image=img)
                 self.label.image = img
@@ -504,9 +561,28 @@ class WelcomePage(ttk.Frame):
             self.file_menu.add_command(label="Show Records", command=self.show_records)
             self.file_menu.add_separator()
             self.file_menu.add_command(label="Configuration", command=self.configuration)
+            self.file_menu.add_separator()
+            self.file_menu.add_command(label="Plc Trigger", command=self.plc_trigger)
+            self.file_menu.add_separator()
             self.menubar.add_cascade(label="Tools", menu=self.file_menu)
         else:
             self.master.config(menu=None)
+
+
+    def visit_ip(self,ip_address):
+        try:
+            response = requests.get(f"http://{ip_address}")
+            if response.status_code == 200:
+                print(f"Successfully visited {ip_address}")
+            else:
+                print(f"Failed to visit {ip_address}. Status code: {response.status_code}")
+        except requests.RequestException as e:
+            print(f"Failed to visit {ip_address}. Error: {e}")
+
+    def plc_trigger(self):
+        self.ip_addresses = ["192.168.234.74/6", "192.168.234.74/0"]  # Replace x.x.x.x and y.y.y.y with your actual IP addresses
+        for ip in self.ip_addresses:
+            self.visit_ip(ip)
 
     def configuration(self):
         script_path = os.path.abspath('configuration.py')
@@ -522,6 +598,125 @@ class WelcomePage(ttk.Frame):
         records_page = self.create_records_page(self.master)
         records_page.grid(row=1, column=0, padx=self.const4, pady=self.const4)
 
+
+    def create_records_page(self, master):
+        self.master.withdraw()
+        self.newwindow = tk.Toplevel(master)
+
+        ht1 = self.winfo_screenheight()
+        const1 = int(ht1 / 54)  # 16
+        const2 = int(ht1 / 43.2)  # 20
+        const3 = int(ht1 / 86.4)  # 10
+        const4 = int(ht1 / 72)  # 12
+        const5 = int(ht1 / 432)  # 2
+        const6 = int(ht1 / 172.8)  # 5
+
+        self.newwindow.overrideredirect(True)
+        screen_width = self.newwindow.winfo_screenwidth()
+        screen_height = self.newwindow.winfo_screenheight()
+        self.newwindow.geometry(f"{screen_width}x{screen_height}")
+
+        records_frame = ttk.Frame(self.newwindow)
+        records_frame.pack(expand=True, fill='both')
+        
+        label = ttk.Label(records_frame, text="Records", font=('Helvetica', const1))
+        label.grid(row=0, column=0, pady=const2, columnspan=3)
+
+        filter_criteria = ttk.Combobox(records_frame, values=["Date", "Month", "Camera"])
+        filter_criteria.grid(row=1, column=2, pady=const3, padx=const3)
+        filter_criteria.set("Date") 
+        filter_criteria.bind("<<ComboboxSelected>>", lambda event: self.toggle_filter_options(filter_criteria, date_entry, camera_combobox))
+
+        date_entry = DateEntry(records_frame, width=const4, background='blue', foreground='white', borderwidth=const5)
+        date_entry.grid(row=2, column=2, pady=const3, padx=const3)
+        date_entry.grid_remove()  
+
+        camera_combobox = ttk.Combobox(records_frame, values=["Camera 1", "Camera 2", "Camera 3", "Camera 4"])
+        camera_combobox.grid(row=2, column=2, pady=const3, padx=const3)
+        camera_combobox.grid_remove() 
+
+        filter_button = ttk.Button(records_frame, text="Filter", style="filter.TButton",
+                                command=lambda: self.filter_records(tree, filter_criteria, camera_combobox, date_entry))
+        filter_button.grid(row=1, column=1, pady=const3)
+
+        back_button = ttk.Button(records_frame, text="Back", style="back.TButton", command=self.back)
+        back_button.grid(row=1, column=0, pady=const5)
+
+        tree = ttk.Treeview(records_frame, columns=("Camera", "Screenshot Location", "Timestamp", "PLC_ID"))
+        tree.grid(row=4, column=0, columnspan=3, sticky="nsew")
+        records_frame.grid_rowconfigure(4, weight=1) 
+        records_frame.grid_columnconfigure((0, 1, 2), weight=1) 
+
+        tree.heading("#0", text="ID")
+        tree.heading("Camera", text="Camera")
+        tree.heading("Screenshot Location", text="PCB_ID")
+        tree.heading("Timestamp", text="Timestamp")
+        tree.heading("PLC_ID", text="No of Defected Components")
+
+        vsb = ttk.Scrollbar(records_frame, orient="vertical", command=tree.yview)
+        vsb.grid(row=4, column=3, sticky="ns")
+        tree.configure(yscrollcommand=vsb.set)
+
+        tree.bind("<ButtonRelease-1>", lambda event: self.open_link(event, tree))
+
+        self.fetch_and_display_all_records(tree)
+
+    def fetch_and_display_all_records(self, tree):
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM records")
+        records = cursor.fetchall()
+        conn.close()
+
+        for item in tree.get_children():
+            tree.delete(item)
+
+        for record in records:
+            tree.insert("", "end", text=record[0], values=(record[1], record[2], record[3], record[4]))
+
+    def open_link(self, event, tree):
+
+        item = tree.selection()[0]
+        screenshot_location = tree.item(item, "values")[1]
+        webbrowser.open_new_tab(screenshot_location)
+
+    def toggle_filter_options(self, filter_criteria, date_entry, camera_combobox):
+        criteria = filter_criteria.get()
+        if criteria == "Date" or criteria == "Month":
+            # date_entry.flex()
+            date_entry.grid()
+            camera_combobox.grid_remove()
+        elif criteria == "Camera":
+            camera_combobox.grid()
+            date_entry.grid_remove()
+
+    def filter_records(self, tree, filter_criteria, camera_combobox, date_entry):
+        criteria = filter_criteria.get()
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        if criteria == "Date":
+            selected_date = date_entry.get_date().strftime("%Y-%m-%d")
+            cursor.execute("SELECT * FROM records WHERE DATE(timestamp) = ?", (selected_date,))
+        elif criteria == "Month":
+            selected_month = date_entry.get_date().strftime("%Y-%m")
+            cursor.execute("SELECT * FROM records WHERE strftime('%Y-%m', timestamp) = ?", (selected_month,))
+        elif criteria == "Camera":
+            selected_camera = int(camera_combobox.get().split()[1])
+            cursor.execute("SELECT * FROM records WHERE camera = ?", (f"Camera {selected_camera}",))
+
+        records = cursor.fetchall()
+        for item in tree.get_children():
+            tree.delete(item)
+        for record in records:
+            tree.insert("", "end", text=record[0], values=(record[1], record[2], record[3], record[4]))
+
+        conn.close()
+
+    def back(self):
+        self.newwindow.destroy()
+        self.master.deiconify()
 
 
 if __name__ == "__main__":
