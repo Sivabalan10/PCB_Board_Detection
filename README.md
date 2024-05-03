@@ -1,2 +1,3 @@
-# PCB_Board_Detection
-PCB Board detection using YOLO V8 model to find the defects in PCB using custom dataset and using PCB sorter to remove the defected PCB.
+## PCB Board Detection
+
+This repository implements a PCB board detection system using the YOLO V8 model. The model is trained on a custom dataset to identify defects in PCBs. Additionally, it includes functionality for using a PCB sorter to remove defective PCBs from the production line.
